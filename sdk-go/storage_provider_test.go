@@ -956,12 +956,14 @@ func TestOpSetTimes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gotMtime := time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec)
+	mtimSec, mtimNsec := platformStatMtime(&stat)
+	gotMtime := time.Unix(mtimSec, mtimNsec)
 	if !gotMtime.Equal(mtime) {
 		t.Errorf("mtime mismatch: got %v, want %v", gotMtime, mtime)
 	}
 
-	gotAtime := time.Unix(stat.Atim.Sec, stat.Atim.Nsec)
+	atimSec, atimNsec := platformStatAtime(&stat)
+	gotAtime := time.Unix(atimSec, atimNsec)
 	if !gotAtime.Equal(atime) {
 		t.Errorf("atime mismatch: got %v, want %v", gotAtime, atime)
 	}
@@ -998,7 +1000,8 @@ func TestOpSetTimes_OmitOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gotMtime := time.Unix(newStat.Mtim.Sec, newStat.Mtim.Nsec)
+	newMtimSec, newMtimNsec := platformStatMtime(&newStat)
+	gotMtime := time.Unix(newMtimSec, newMtimNsec)
 	if !gotMtime.Equal(mtime) {
 		t.Errorf("mtime mismatch: got %v, want %v", gotMtime, mtime)
 	}

@@ -512,14 +512,14 @@ func (sp *StorageProvider) opRename(corrID string, req *pb.RenameRequest) *pb.St
 	var flags uint
 	switch req.Flags {
 	case 1: // NOREPLACE
-		flags = unix.RENAME_NOREPLACE
+		flags = platformRenameNoreplace()
 	case 2: // EXCHANGE
-		flags = unix.RENAME_EXCHANGE
+		flags = platformRenameExchange()
 	default:
 		flags = 0
 	}
 
-	if err := unix.Renameat2(srcDirFd, srcName, dstDirFd, dstName, flags); err != nil {
+	if err := platformRenameat2(srcDirFd, srcName, dstDirFd, dstName, flags); err != nil {
 		return osErrorResponse(corrID, err)
 	}
 
@@ -552,12 +552,12 @@ func (sp *StorageProvider) opCopy(corrID string, req *pb.CopyRequest) *pb.Storag
 		return osErrorResponse(corrID, err)
 	}
 
-	if srcStat.Mode&unix.S_IFMT == unix.S_IFDIR {
+	if platformStatMode(&srcStat)&unix.S_IFMT == unix.S_IFDIR {
 		if err := copyDirAt(srcDirFd, srcName, dstDirFd, dstName); err != nil {
 			return osErrorResponse(corrID, err)
 		}
 	} else {
-		if err := copyFileAt(srcDirFd, srcName, dstDirFd, dstName, srcStat.Mode&0o7777); err != nil {
+		if err := copyFileAt(srcDirFd, srcName, dstDirFd, dstName, platformStatMode(&srcStat)&0o7777); err != nil {
 			return osErrorResponse(corrID, err)
 		}
 	}
@@ -595,7 +595,7 @@ func copyDirAt(srcParentFd int, srcName string, dstParentFd int, dstName string)
 	}
 
 	// Create destination directory.
-	if err := unix.Mkdirat(dstParentFd, dstName, srcStat.Mode&0o7777); err != nil && err != unix.EEXIST {
+	if err := unix.Mkdirat(dstParentFd, dstName, platformStatMode(&srcStat)&0o7777); err != nil && err != unix.EEXIST {
 		return err
 	}
 
@@ -631,12 +631,12 @@ func copyDirAt(srcParentFd int, srcName string, dstParentFd int, dstName string)
 			return err
 		}
 
-		if stat.Mode&unix.S_IFMT == unix.S_IFDIR {
+		if platformStatMode(&stat)&unix.S_IFMT == unix.S_IFDIR {
 			if err := copyDirAt(srcDirFd, name, dstDirFd, name); err != nil {
 				return err
 			}
 		} else {
-			if err := copyFileAt(srcDirFd, name, dstDirFd, name, stat.Mode&0o7777); err != nil {
+			if err := copyFileAt(srcDirFd, name, dstDirFd, name, platformStatMode(&stat)&0o7777); err != nil {
 				return err
 			}
 		}
@@ -705,8 +705,8 @@ func (sp *StorageProvider) opSetTimes(corrID string, req *pb.SetTimesRequest) *p
 	// Build utimensat timespec slice: [atime, mtime].
 	// UTIME_OMIT means "don't change this time".
 	ts := []unix.Timespec{
-		{Sec: 0, Nsec: unix.UTIME_OMIT}, // atime
-		{Sec: 0, Nsec: unix.UTIME_OMIT}, // mtime
+		{Sec: 0, Nsec: platformUtimeOmit()}, // atime
+		{Sec: 0, Nsec: platformUtimeOmit()}, // mtime
 	}
 
 	if req.Atime != nil {
@@ -781,8 +781,8 @@ func (sp *StorageProvider) opStatFs(corrID string) *pb.StorageOperationResponse 
 				Files:   stat.Files,
 				Ffree:   stat.Ffree,
 				Bsize:   uint32(stat.Bsize),
-				Namelen: uint32(stat.Namelen),
-				Frsize:  uint32(stat.Frsize),
+				Namelen: platformStatfsNamelen(&stat),
+				Frsize:  platformStatfsFrsize(&stat),
 			},
 		},
 	})
@@ -856,7 +856,7 @@ func osErrorResponse(corrID string, err error) *pb.StorageOperationResponse {
 
 func statToProto(path, name string, stat *unix.Stat_t) *pb.FileStatData {
 	var fileType uint32
-	switch stat.Mode & unix.S_IFMT {
+	switch platformStatMode(stat) & unix.S_IFMT {
 	case unix.S_IFDIR:
 		fileType = 1 // Directory
 	case unix.S_IFLNK:
@@ -870,27 +870,27 @@ func statToProto(path, name string, stat *unix.Stat_t) *pb.FileStatData {
 		Path:     path,
 		FileType: fileType,
 		Size:     uint64(stat.Size),
-		Mode:     stat.Mode & 0o7777, // permission bits only
+		Mode:     platformStatMode(stat) & 0o7777, // permission bits only
 		Uid:      stat.Uid,
 		Gid:      stat.Gid,
 	}
 
 	// Modification time.
-	if stat.Mtim.Sec > 0 {
-		t := time.Unix(stat.Mtim.Sec, stat.Mtim.Nsec)
+	if mtimSec, mtimNsec := platformStatMtime(stat); mtimSec > 0 {
+		t := time.Unix(mtimSec, mtimNsec)
 		result.ModifiedAt = timestamppb.New(t)
 	}
 
 	// Access time.
-	if stat.Atim.Sec > 0 {
-		t := time.Unix(stat.Atim.Sec, stat.Atim.Nsec)
+	if atimSec, atimNsec := platformStatAtime(stat); atimSec > 0 {
+		t := time.Unix(atimSec, atimNsec)
 		result.AccessedAt = timestamppb.New(t)
 	}
 
 	// Creation time (birth time) — Linux populates Ctim as ctime (inode change),
 	// which is the best approximation.
-	if stat.Ctim.Sec > 0 {
-		t := time.Unix(stat.Ctim.Sec, stat.Ctim.Nsec)
+	if ctimSec, ctimNsec := platformStatCtime(stat); ctimSec > 0 {
+		t := time.Unix(ctimSec, ctimNsec)
 		result.CreatedAt = timestamppb.New(t)
 	}
 
